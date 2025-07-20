@@ -462,7 +462,7 @@ class SemanticChunker:
         """Paragraflardan chunk yaratish"""
         content = "\n\n".join(paragraphs)
         
-        if len(content) < HighAccuracyConfig.MIN_CHUNK_LENGTH:
+        if len(content) < UltraHighAccuracyConfig.MIN_CHUNK_LENGTH:
             return None
         
         # Kalit so'zlarni chiqarish
@@ -482,7 +482,7 @@ class SemanticChunker:
         """Jumlalardan chunk yaratish"""
         content = " ".join(sentences)
         
-        if len(content) < HighAccuracyConfig.MIN_CHUNK_LENGTH:
+        if len(content) < UltraHighAccuracyConfig.MIN_CHUNK_LENGTH:
             return None
         
         keywords = self.text_cleaner.extract_keywords(content, top_k=5)
@@ -853,7 +853,7 @@ class AdvancedDatabase:
 class HybridRetriever:
     """Semantic + Keyword + BM25 hybrid search"""
     
-    def __init__(self, database: AdvancedDatabase, embedder: HybridEmbedder):
+    def __init__(self, database: AdvancedDatabase, embedder: UltraHybridEmbedder):
         self.database = database
         self.embedder = embedder
         self.text_cleaner = TextCleaner()
@@ -1047,8 +1047,8 @@ class HybridRetriever:
             
             # Combined score with weights
             combined_score = (
-                HighAccuracyConfig.SEMANTIC_WEIGHT * semantic_score +
-                HighAccuracyConfig.KEYWORD_WEIGHT * keyword_score +
+                UltraHighAccuracyConfig.SEMANTIC_WEIGHT * semantic_score +
+                UltraHighAccuracyConfig.KEYWORD_WEIGHT * keyword_score +
                 0.3 * min(bm25_score / 10.0, 1.0)  # BM25 normalize
             )
             
@@ -1288,7 +1288,7 @@ class IntelligentResponseGenerator:
             'manzil', 'ko\'cha', 'bino', 'ofis', 'joy', 'joyda'
         ]
         
-        sentences = sent_tokenize(text)
+        sentences = safe_sent_tokenize(text)
         locations = []
         
         for sentence in sentences:
@@ -1306,7 +1306,7 @@ class IntelligentResponseGenerator:
         # Simple name extraction (capitalized words)
         people_indicators = ['tomonidan', 'muallif', 'yozuvchi', 'direktor', 'mudur', 'rahbar']
         
-        sentences = sent_tokenize(text)
+        sentences = safe_sent_tokenize(text)
         people = []
         
         for sentence in sentences:
@@ -1331,7 +1331,7 @@ class IntelligentResponseGenerator:
             'chunki', 'negaki', 'because', 'due to', 'as a result'
         ]
         
-        sentences = sent_tokenize(text)
+        sentences = safe_sent_tokenize(text)
         reasons = []
         
         for sentence in sentences:
@@ -1364,7 +1364,7 @@ class IntelligentResponseGenerator:
             'lekin', 'ammo', 'biroq', 'however', 'but', 'whereas'
         ]
         
-        sentences = sent_tokenize(text)
+        sentences = safe_sent_tokenize(text)
         differences = []
         
         for sentence in sentences:
@@ -1485,11 +1485,11 @@ class SuperAdvancedConfidenceCalculator:
         keyword_coverage = self.calculate_enhanced_keyword_coverage(query, results)
         confidence_factors.append(keyword_coverage)
         
-        # 8. NEW: Content length and structure score
+        # 8. Content length and structure score
         structure_score = self.calculate_content_structure_score(generated_answer)
         confidence_factors.append(structure_score)
         
-        # 9. NEW: Query complexity matching
+        # 9. Query complexity matching
         complexity_match = self.calculate_query_complexity_match(query, results)
         confidence_factors.append(complexity_match)
         
@@ -1650,102 +1650,67 @@ class SuperAdvancedConfidenceCalculator:
             r'\*\*.*?\*\*',  # Bold text
             r'^\d+\.',       # Numbered lists
             r'^[-•*]',       # Bullet points
-            r':
+            r':',            # Colons (definitions)
+            r'\n\n',         # Paragraphs
+        ]
+        
+        structure_count = 0
+        for pattern in structure_indicators:
+            if re.search(pattern, answer, re.MULTILINE):
+                structure_count += 1
+        
+        structure_score = min(structure_count / 3, 1.0)  # Max 3 structures
+        
+        # Check for complete sentences
+        sentences = safe_sent_tokenize(answer)
+        complete_sentences = sum(1 for s in sentences if len(s.strip()) > 10 and s.strip().endswith(('.', '!', '?')))
+        sentence_quality = complete_sentences / max(len(sentences), 1)
+        
+        return (structure_score + sentence_quality) / 2
     
-    def calculate_query_answer_relevance(self, query: str, answer: str) -> float:
-        """Query va answer orasidagi relevance"""
-        query_words = set(self.text_cleaner.clean_text(query).lower().split())
-        answer_words = set(self.text_cleaner.clean_text(answer).lower().split())
+    def calculate_query_complexity_match(self, query: str, results: List[Dict]) -> float:
+        """Query complexity va result match"""
+        query_words = len(query.split())
         
-        if not query_words:
-            return 0.0
+        # Simple queries should have high-confidence simple answers
+        if query_words <= 3:
+            # Look for direct matches
+            query_lower = query.lower()
+            direct_matches = 0
+            for result in results[:3]:
+                if any(word in result['content'].lower() for word in query_lower.split()):
+                    direct_matches += 1
+            return min(direct_matches / 3, 1.0)
         
-        # Jaccard similarity
-        intersection = query_words & answer_words
-        union = query_words | answer_words
-        
-        return len(intersection) / len(union) if union else 0.0
-    
-    def calculate_context_consistency(self, results: List[Dict]) -> float:
-        """Context mazmunlarining consistency"""
-        if len(results) < 2:
-            return 1.0
-        
-        contents = [r['content'] for r in results]
-        
-        # Pairwise similarity calculation
-        similarities = []
-        for i in range(len(contents)):
-            for j in range(i + 1, len(contents)):
-                content1_words = set(contents[i].lower().split())
-                content2_words = set(contents[j].lower().split())
-                
-                intersection = content1_words & content2_words
-                union = content1_words | content2_words
-                
-                if union:
-                    similarity = len(intersection) / len(union)
-                    similarities.append(similarity)
-        
-        return np.mean(similarities) if similarities else 0.0
-    
-    def calculate_answer_completeness(self, query: str, answer: str) -> float:
-        """Javobning to'liqligi"""
-        # Answer uzunligi (optimal range)
-        answer_length = len(answer)
-        if answer_length < 50:
-            length_score = answer_length / 50
-        elif answer_length > 1000:
-            length_score = max(0.5, 1000 / answer_length)
+        # Complex queries should have comprehensive results
         else:
-            length_score = 1.0
-        
-        # Question words coverage
-        question_words = ['nima', 'qanday', 'qachon', 'qayer', 'kim', 'nega', 'qancha']
-        query_lower = query.lower()
-        
-        answered_questions = 0
-        total_questions = 0
-        
-        for qw in question_words:
-            if qw in query_lower:
-                total_questions += 1
-                # Check if answer contains related content
-                if any(indicator in answer.lower() for indicator in [
-                    'ta\'rif', 'jarayon', 'vaqt', 'joy', 'shaxs', 'sabab', 'miqdor'
-                ]):
-                    answered_questions += 1
-        
-        question_coverage = answered_questions / total_questions if total_questions > 0 else 1.0
-        
-        return (length_score + question_coverage) / 2
+            total_content_length = sum(len(r['content']) for r in results[:5])
+            complexity_score = min(total_content_length / (query_words * 100), 1.0)
+            return complexity_score
     
-    def calculate_source_diversity(self, results: List[Dict]) -> float:
-        """Source turlarining diversity"""
-        sources = [r.get('source', '') for r in results]
-        unique_sources = len(set(sources))
-        total_sources = len(sources)
+    def apply_confidence_boosting(self, base_confidence: float, results: List[Dict], query: str) -> float:
+        """Apply confidence boosting based on various factors"""
+        boost_factor = 1.0
         
-        return unique_sources / total_sources if total_sources > 0 else 0.0
-    
-    def calculate_keyword_coverage(self, query: str, results: List[Dict]) -> float:
-        """Query keywords ning results da coverage"""
-        query_keywords = set(self.text_cleaner.extract_keywords(query, top_k=5))
+        # Boost for high-quality top results
+        if results and results[0].get('combined_score', 0) > 0.8:
+            boost_factor *= 1.15
         
-        if not query_keywords:
-            return 1.0
+        # Boost for multiple consistent results
+        if len(results) >= 5:
+            boost_factor *= 1.1
         
-        result_keywords = set()
-        for result in results:
-            if result.get('keywords'):
-                result_keywords.update(result['keywords'])
+        # Boost for simple, direct queries
+        if len(query.split()) <= 4 and any(word in query.lower() for word in ['nima', 'kim', 'qanday']):
+            boost_factor *= 1.2
         
-        if not result_keywords:
-            return 0.0
+        # Apply diminishing returns
+        boosted = base_confidence * boost_factor
         
-        # Keywords overlap
-        overlap = query_keywords & result_keywords
-        return len(overlap) / len(query_keywords)
+        # Sigmoid-like function for smoother confidence distribution
+        final_confidence = boosted / (1 + np.exp(-(boosted - 0.5) * 6))
+        
+        return min(final_confidence, 0.98)
 
 class UltraHighAccuracyRAGPipeline:
     """Ultra yuqori aniqlikli RAG pipeline - 90%+ target"""
@@ -2214,1334 +2179,146 @@ def create_advanced_streamlit_interface():
         with col2:
             clear_btn = st.button("🗑️ Tozalash", use_container_width=True)
         
-        # Processing with comprehensive error handling and debugging
+        # Processing logic
         if process_btn and uploaded_files:
-            # Create temporary directory
             temp_dir = Path("./temp_uploads")
             temp_dir.mkdir(exist_ok=True)
-            
-            # Initialize variables
             temp_paths = []
             
             try:
-                # Phase 1: File saving
-                st.info("📁 1-bosqich: Fayllar saqlanmoqda...")
-                progress_bar = st.progress(0)
-                
-                total_files = len(uploaded_files)
+                # Save uploaded files
+                st.info("📁 Fayllar saqlanmoqda...")
                 for i, uploaded_file in enumerate(uploaded_files):
-                    try:
-                        # Progress update
-                        progress = (i + 1) / total_files * 0.2
-                        progress_bar.progress(progress)
-                        
-                        # Create safe filename
-                        original_name = uploaded_file.name
-                        safe_name = re.sub(r'[^\w\-_\.]', '_', original_name)
-                        if not safe_name:
-                            safe_name = f"document_{i}.txt"
-                        
-                        temp_path = temp_dir / f"{i}_{safe_name}"
-                        
-                        # Save file
-                        file_content = uploaded_file.read()
-                        if len(file_content) == 0:
-                            st.warning(f"⚠️ Bo'sh fayl: {original_name}")
-                            continue
-                            
-                        with open(temp_path, "wb") as f:
-                            f.write(file_content)
-                        
-                        temp_paths.append(str(temp_path))
-                        st.success(f"✅ Saqlandi: {original_name} ({len(file_content)} bytes)")
-                        
-                    except Exception as e:
-                        st.error(f"❌ {uploaded_file.name} saqlashda xatolik: {str(e)}")
-                        continue
+                    temp_path = temp_dir / f"{i}_{uploaded_file.name}"
+                    with open(temp_path, "wb") as f:
+                        f.write(uploaded_file.read())
+                    temp_paths.append(str(temp_path))
                 
-                if not temp_paths:
-                    st.error("❌ Hech qanday fayl saqlanmadi!")
-                    return
+                # Process documents
+                st.info("🧠 Hujjatlar qayta ishlanmoqda...")
+                st.session_state.rag_pipeline.process_documents(temp_paths)
                 
-                st.success(f"✅ {len(temp_paths)} ta fayl muvaffaqiyatli saqlandi")
-                
-                # Phase 2: Document processing
-                st.info("🧠 2-bosqich: Hujjatlar qayta ishlanmoqda...")
-                progress_bar.progress(0.3)
-                
-                # Test document loading first
-                doc_loader = AdvancedDocumentLoader()
-                loaded_texts = []
-                
-                for i, temp_path in enumerate(temp_paths):
-                    try:
-                        progress = 0.3 + (i + 1) / len(temp_paths) * 0.2
-                        progress_bar.progress(progress)
-                        
-                        text = doc_loader.load_document(temp_path)
-                        if text and len(text.strip()) > 10:
-                            loaded_texts.append((temp_path, text))
-                            st.info(f"📄 Yuklandi: {Path(temp_path).name} ({len(text)} belgi)")
-                        else:
-                            st.warning(f"⚠️ Bo'sh yoki juda qisqa matn: {Path(temp_path).name}")
-                    except Exception as e:
-                        st.error(f"❌ {Path(temp_path).name} yuklashda xatolik: {str(e)}")
-                        continue
-                
-                if not loaded_texts:
-                    st.error("❌ Hech qanday matn yuklanmadi!")
-                    return
-                
-                st.success(f"✅ {len(loaded_texts)} ta hujjat matnlari yuklandi")
-                
-                # Phase 3: Create new pipeline and process
-                st.info("⚙️ 3-bosqich: RAG pipeline yaratilmoqda...")
-                progress_bar.progress(0.6)
-                
-                # Create completely fresh ultra pipeline
-                new_config = UltraHighAccuracyConfig()
-                new_pipeline = UltraHighAccuracyRAGPipeline(new_config)
-                
-                # Process each document step by step
-                all_chunks = []
-                all_keywords = []
-                
-                for i, (file_path, text) in enumerate(loaded_texts):
-                    try:
-                        progress = 0.6 + (i + 1) / len(loaded_texts) * 0.2
-                        progress_bar.progress(progress)
-                        
-                        # Create chunks
-                        chunks = new_pipeline.chunker.chunk_by_semantic_similarity(text, source=Path(file_path).name)
-                        valid_chunks = [chunk for chunk in chunks if chunk is not None]
-                        
-                        if valid_chunks:
-                            all_chunks.extend(valid_chunks)
-                            chunk_keywords = [chunk.get('keywords', []) for chunk in valid_chunks]
-                            all_keywords.extend(chunk_keywords)
-                            st.info(f"🔧 {Path(file_path).name}: {len(valid_chunks)} chunk yaratildi")
-                        else:
-                            st.warning(f"⚠️ {Path(file_path).name}: chunk yaratilmadi")
-                            
-                    except Exception as e:
-                        st.error(f"❌ {Path(file_path).name} chunking xatolik: {str(e)}")
-                        continue
-                
-                if not all_chunks:
-                    st.error("❌ Hech qanday chunk yaratilmadi!")
-                    return
-                
-                st.success(f"✅ Jami {len(all_chunks)} ta chunk yaratildi")
-                
-                # Phase 4: Create embeddings
-                st.info("🧠 4-bosqich: Embeddings yaratilmoqda...")
-                progress_bar.progress(0.8)
-                
-                try:
-                    chunk_texts = [chunk['content'] for chunk in all_chunks]
-                    embeddings = new_pipeline.embedder.fit_transform(chunk_texts, all_keywords)
-                    st.success(f"✅ Embeddings yaratildi: {embeddings.shape}")
-                except Exception as e:
-                    st.error(f"❌ Embeddings yaratishda xatolik: {str(e)}")
-                    return
-                
-                # Phase 5: Save to database
-                st.info("💾 5-bosqich: Database ga saqlash...")
-                progress_bar.progress(0.9)
-                
-                try:
-                    new_pipeline.database.add_documents(all_chunks, embeddings)
-                    new_pipeline.retriever = HybridRetriever(new_pipeline.database, new_pipeline.embedder)
-                    new_pipeline.embedder.save(new_pipeline.config.EMBEDDINGS_PATH)
-                    new_pipeline.is_ready = True
-                    st.success("✅ Database ga saqlandi")
-                except Exception as e:
-                    st.error(f"❌ Database ga saqlashda xatolik: {str(e)}")
-                    return
-                
-                # Phase 6: Final verification and replacement
-                st.info("✅ 6-bosqich: Yakuniy tekshirish...")
-                progress_bar.progress(0.95)
-                
-                # Verify everything works
-                try:
-                    test_stats = new_pipeline.database.get_stats()
-                    if test_stats['total_documents'] > 0 and new_pipeline.is_ready:
-                        # Replace the session pipeline
-                        st.session_state.rag_pipeline = new_pipeline
-                        
-                        progress_bar.progress(1.0)
-                        
-                        # Show final success
-                        success_msg = f"""
-                        🎉 **MUVAFFAQIYAT!**
-                        
-                        ✅ **Jami hujjatlar:** {test_stats['total_documents']}  
-                        ✅ **Noyob manbalar:** {test_stats['unique_sources']}  
-                        ✅ **O'rtacha uzunlik:** {test_stats['average_length']:.0f} belgi  
-                        ✅ **Model holati:** Tayyor  
-                        
-                        Endi savollaringizni bering! 🚀
-                        """
-                        st.balloons()
-                        st.success(success_msg)
-                        
-                        # Auto-refresh after success
-                        import time
-                        time.sleep(3)
-                        st.rerun()
-                        
-                    else:
-                        st.error("❌ Model tekshiruvdan o'tmadi!")
-                        
-                except Exception as e:
-                    st.error(f"❌ Yakuniy tekshiruvda xatolik: {str(e)}")
+                st.success("✅ Qayta ishlash tugadi!")
+                st.balloons()
                 
             except Exception as e:
-                st.error(f"❌ Umumiy xatolik: {str(e)}")
-                import traceback
-                st.code(traceback.format_exc())
-                
+                st.error(f"❌ Xatolik: {e}")
             finally:
-                # Cleanup temp files
+                # Cleanup
                 for temp_path in temp_paths:
                     try:
-                        if os.path.exists(temp_path):
-                            os.remove(temp_path)
+                        os.remove(temp_path)
                     except:
                         pass
                 try:
-                    if temp_dir.exists():
-                        import shutil
-                        shutil.rmtree(temp_dir, ignore_errors=True)
+                    import shutil
+                    shutil.rmtree(temp_dir, ignore_errors=True)
                 except:
                     pass
         
         # Clear data
         if clear_btn:
-            if st.session_state.get('clear_confirmed', False):
-                try:
-                    # Remove database and embeddings
-                    if os.path.exists(st.session_state.rag_pipeline.config.DATABASE_PATH):
-                        os.remove(st.session_state.rag_pipeline.config.DATABASE_PATH)
-                    if os.path.exists(st.session_state.rag_pipeline.config.EMBEDDINGS_PATH):
-                        os.remove(st.session_state.rag_pipeline.config.EMBEDDINGS_PATH)
-                    
-                    # Reset pipeline
-                    st.session_state.rag_pipeline = UltraHighAccuracyRAGPipeline()
-                    st.session_state.messages = []
-                    st.session_state.clear_confirmed = False
-                    
-                    st.success("✅ Ma'lumotlar tozalandi!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Tozalash xatolik: {e}")
-            else:
-                st.session_state.clear_confirmed = True
-                st.warning("⚠️ Haqiqatan ham barcha ma'lumotlarni o'chirmoqchimisiz? Qayta bosing.")
+            try:
+                # Remove files
+                if os.path.exists(st.session_state.rag_pipeline.config.DATABASE_PATH):
+                    os.remove(st.session_state.rag_pipeline.config.DATABASE_PATH)
+                if os.path.exists(st.session_state.rag_pipeline.config.EMBEDDINGS_PATH):
+                    os.remove(st.session_state.rag_pipeline.config.EMBEDDINGS_PATH)
+                
+                # Reset pipeline
+                st.session_state.rag_pipeline = UltraHighAccuracyRAGPipeline()
+                st.session_state.messages = []
+                
+                st.success("✅ Ma'lumotlar tozalandi!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Tozalash xatolik: {e}")
     
     # Main chat interface
     st.header("💬 Yuqori Aniqlikli Suhbat")
     
-    # Chat container
-    chat_container = st.container()
-    
-    with chat_container:
-        # Display chat messages
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+    # Display chat messages
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+            
+            if message["role"] == "assistant" and "confidence" in message:
+                confidence = message["confidence"]
+                if confidence >= 80:
+                    conf_class = "confidence-high"
+                    conf_icon = "🎯"
+                elif confidence >= 60:
+                    conf_class = "confidence-medium"
+                    conf_icon = "⚡"
+                else:
+                    conf_class = "confidence-low"
+                    conf_icon = "⚠️"
                 
-                # Additional info for assistant messages
-                if message["role"] == "assistant":
-                    if "confidence" in message:
-                        confidence = message["confidence"]
-                        if confidence >= 80:
-                            conf_class = "confidence-high"
-                            conf_icon = "🎯"
-                        elif confidence >= 60:
-                            conf_class = "confidence-medium"
-                            conf_icon = "⚡"
-                        else:
-                            conf_class = "confidence-low"
-                            conf_icon = "⚠️"
-                        
-                        st.markdown(f"""
-                        <div style="margin: 1rem 0;">
-                            <span class="{conf_class}">{conf_icon} Ishonchlilik: {confidence}%</span>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    # Sources
-                    if "sources" in message and message["sources"]:
-                        with st.expander("📚 Manbalar"):
-                            for i, source in enumerate(message["sources"], 1):
-                                st.write(f"{i}. {source}")
-                    
-                    # Search details
-                    if "search_details" in message:
-                        details = message["search_details"]
-                        with st.expander("🔍 Qidiruv tafsilotlari"):
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Semantic", details.get('semantic_results', 0))
-                            with col2:
-                                st.metric("Keyword", details.get('keyword_results', 0))
-                            with col3:
-                                st.metric("BM25", details.get('bm25_results', 0))
-                            
-                            st.metric("Top Score", f"{details.get('top_score', 0):.3f}")
+                st.markdown(f"""
+                <div style="margin: 1rem 0;">
+                    <span class="{conf_class}">{conf_icon} Ishonchlilik: {confidence}%</span>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                if "sources" in message and message["sources"]:
+                    with st.expander("📚 Manbalar"):
+                        for i, source in enumerate(message["sources"], 1):
+                            st.write(f"{i}. {source}")
     
     # Chat input
-    if prompt := st.chat_input("Savolingizni yozing... (Yuqori aniqlik rejimida)"):
+    if prompt := st.chat_input("Savolingizni yozing..."):
         # Add user message
         st.session_state.messages.append({"role": "user", "content": prompt})
         
-        with chat_container:
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            
-            # Generate response
-            with st.chat_message("assistant"):
-                if not st.session_state.rag_pipeline.is_ready:
-                    response_text = "❌ Model hali tayyor emas. Iltimos, avval hujjatlarni yuklang va qayta ishlang."
-                    st.markdown(response_text)
-                    
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": response_text
-                    })
-                else:
-                    with st.spinner("🧠 Yuqori aniqlikda javob tayyorlanmoqda..."):
-                        response = st.session_state.rag_pipeline.query(prompt)
-                    
-                    # Display response
-                    st.markdown(response['answer'])
-                    
-                    # Confidence display
-                    confidence = response['confidence']
-                    if confidence >= 80:
-                        conf_class = "confidence-high"
-                        conf_icon = "🎯"
-                    elif confidence >= 60:
-                        conf_class = "confidence-medium"
-                        conf_icon = "⚡"
-                    else:
-                        conf_class = "confidence-low"
-                        conf_icon = "⚠️"
-                    
-                    st.markdown(f"""
-                    <div style="margin: 1rem 0;">
-                        <span class="{conf_class}">{conf_icon} Ishonchlilik: {confidence}%</span>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Sources
-                    if response['sources']:
-                        with st.expander("📚 Manbalar"):
-                            for i, source in enumerate(response['sources'], 1):
-                                st.write(f"{i}. {source}")
-                    
-                    # Search details
-                    if 'search_details' in response:
-                        details = response['search_details']
-                        with st.expander("🔍 Qidiruv tafsilotlari"):
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Semantic", details.get('semantic_results', 0))
-                            with col2:
-                                st.metric("Keyword", details.get('keyword_results', 0))
-                            with col3:
-                                st.metric("BM25", details.get('bm25_results', 0))
-                            
-                            st.metric("Top Score", f"{details.get('top_score', 0):.3f}")
-                    
-                    # Save message
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": response['answer'],
-                        "confidence": response['confidence'],
-                        "sources": response['sources'],
-                        "search_details": response.get('search_details', {})
-                    })
-
-if __name__ == "__main__":
-    # Run interface
-    create_advanced_streamlit_interface(),           # Colons (definitions)
-            r'\n\n',         # Paragraphs
-        ]
+        with st.chat_message("user"):
+            st.markdown(prompt)
         
-        structure_count = 0
-        for pattern in structure_indicators:
-            if re.search(pattern, answer, re.MULTILINE):
-                structure_count += 1
-        
-        structure_score = min(structure_count / 3, 1.0)  # Max 3 structures
-        
-        # Check for complete sentences
-        sentences = safe_sent_tokenize(answer)
-        complete_sentences = sum(1 for s in sentences if len(s.strip()) > 10 and s.strip().endswith(('.', '!', '?')))
-        sentence_quality = complete_sentences / max(len(sentences), 1)
-        
-        return (structure_score + sentence_quality) / 2
-    
-    def calculate_query_complexity_match(self, query: str, results: List[Dict]) -> float:
-        """Query complexity va result match"""
-        query_words = len(query.split())
-        
-        # Simple queries should have high-confidence simple answers
-        if query_words <= 3:
-            # Look for direct matches
-            query_lower = query.lower()
-            direct_matches = 0
-            for result in results[:3]:
-                if any(word in result['content'].lower() for word in query_lower.split()):
-                    direct_matches += 1
-            return min(direct_matches / 3, 1.0)
-        
-        # Complex queries should have comprehensive results
-        else:
-            total_content_length = sum(len(r['content']) for r in results[:5])
-            complexity_score = min(total_content_length / (query_words * 100), 1.0)
-            return complexity_score
-    
-    def apply_confidence_boosting(self, base_confidence: float, results: List[Dict], query: str) -> float:
-        """Apply confidence boosting based on various factors"""
-        boost_factor = 1.0
-        
-        # Boost for high-quality top results
-        if results and results[0].get('combined_score', 0) > 0.8:
-            boost_factor *= 1.15
-        
-        # Boost for multiple consistent results
-        if len(results) >= 5:
-            boost_factor *= 1.1
-        
-        # Boost for simple, direct queries
-        if len(query.split()) <= 4 and any(word in query.lower() for word in ['nima', 'kim', 'qanday']):
-            boost_factor *= 1.2
-        
-        # Apply diminishing returns
-        boosted = base_confidence * boost_factor
-        
-        # Sigmoid-like function for smoother confidence distribution
-        final_confidence = boosted / (1 + np.exp(-(boosted - 0.5) * 6))
-        
-        return min(final_confidence, 0.98)
-    
-    def calculate_query_answer_relevance(self, query: str, answer: str) -> float:
-        """Query va answer orasidagi relevance"""
-        query_words = set(self.text_cleaner.clean_text(query).lower().split())
-        answer_words = set(self.text_cleaner.clean_text(answer).lower().split())
-        
-        if not query_words:
-            return 0.0
-        
-        # Jaccard similarity
-        intersection = query_words & answer_words
-        union = query_words | answer_words
-        
-        return len(intersection) / len(union) if union else 0.0
-    
-    def calculate_context_consistency(self, results: List[Dict]) -> float:
-        """Context mazmunlarining consistency"""
-        if len(results) < 2:
-            return 1.0
-        
-        contents = [r['content'] for r in results]
-        
-        # Pairwise similarity calculation
-        similarities = []
-        for i in range(len(contents)):
-            for j in range(i + 1, len(contents)):
-                content1_words = set(contents[i].lower().split())
-                content2_words = set(contents[j].lower().split())
-                
-                intersection = content1_words & content2_words
-                union = content1_words | content2_words
-                
-                if union:
-                    similarity = len(intersection) / len(union)
-                    similarities.append(similarity)
-        
-        return np.mean(similarities) if similarities else 0.0
-    
-    def calculate_answer_completeness(self, query: str, answer: str) -> float:
-        """Javobning to'liqligi"""
-        # Answer uzunligi (optimal range)
-        answer_length = len(answer)
-        if answer_length < 50:
-            length_score = answer_length / 50
-        elif answer_length > 1000:
-            length_score = max(0.5, 1000 / answer_length)
-        else:
-            length_score = 1.0
-        
-        # Question words coverage
-        question_words = ['nima', 'qanday', 'qachon', 'qayer', 'kim', 'nega', 'qancha']
-        query_lower = query.lower()
-        
-        answered_questions = 0
-        total_questions = 0
-        
-        for qw in question_words:
-            if qw in query_lower:
-                total_questions += 1
-                # Check if answer contains related content
-                if any(indicator in answer.lower() for indicator in [
-                    'ta\'rif', 'jarayon', 'vaqt', 'joy', 'shaxs', 'sabab', 'miqdor'
-                ]):
-                    answered_questions += 1
-        
-        question_coverage = answered_questions / total_questions if total_questions > 0 else 1.0
-        
-        return (length_score + question_coverage) / 2
-    
-    def calculate_source_diversity(self, results: List[Dict]) -> float:
-        """Source turlarining diversity"""
-        sources = [r.get('source', '') for r in results]
-        unique_sources = len(set(sources))
-        total_sources = len(sources)
-        
-        return unique_sources / total_sources if total_sources > 0 else 0.0
-    
-    def calculate_keyword_coverage(self, query: str, results: List[Dict]) -> float:
-        """Query keywords ning results da coverage"""
-        query_keywords = set(self.text_cleaner.extract_keywords(query, top_k=5))
-        
-        if not query_keywords:
-            return 1.0
-        
-        result_keywords = set()
-        for result in results:
-            if result.get('keywords'):
-                result_keywords.update(result['keywords'])
-        
-        if not result_keywords:
-            return 0.0
-        
-        # Keywords overlap
-        overlap = query_keywords & result_keywords
-        return len(overlap) / len(query_keywords)
-
-class HighAccuracyRAGPipeline:
-    """90% aniqlikli RAG pipeline"""
-    
-    def __init__(self, config: HighAccuracyConfig = None):
-        self.config = config or HighAccuracyConfig()
-        
-        # Components
-        self.doc_loader = AdvancedDocumentLoader()
-        self.chunker = SemanticChunker(
-            chunk_size=self.config.CHUNK_SIZE,
-            chunk_overlap=self.config.CHUNK_OVERLAP
-        )
-        self.embedder = HybridEmbedder(
-            max_features=self.config.MAX_FEATURES,
-            n_components=self.config.SVD_COMPONENTS
-        )
-        self.database = AdvancedDatabase(self.config.DATABASE_PATH)
-        self.retriever = None  # Initialize after embedder is ready
-        self.response_generator = IntelligentResponseGenerator()
-        self.confidence_calculator = AdvancedConfidenceCalculator()
-        
-        self.is_ready = False
-        
-    def process_documents(self, file_paths: List[str]):
-        """Hujjatlarni qayta ishlash va indexing"""
-        logger.info(f"🚀 {len(file_paths)} ta fayl yuqori aniqlikda qayta ishlanmoqda...")
-        
-        all_chunks = []
-        all_keywords = []
-        successful_files = 0
-        
-        # 1. Document loading va chunking
-        for file_path in file_paths:
-            try:
-                logger.info(f"📄 Qayta ishlanmoqda: {file_path}")
-                
-                # Load document
-                text = self.doc_loader.load_document(file_path)
-                if not text.strip():
-                    logger.warning(f"⚠️ Bo'sh fayl: {file_path}")
-                    continue
-                
-                # Semantic chunking
-                chunks = self.chunker.chunk_by_semantic_similarity(text, source=file_path)
-                
-                # Filter valid chunks
-                valid_chunks = [chunk for chunk in chunks if chunk is not None]
-                
-                if valid_chunks:
-                    all_chunks.extend(valid_chunks)
-                    # Keywords collect qilish
-                    chunk_keywords = [chunk.get('keywords', []) for chunk in valid_chunks]
-                    all_keywords.extend(chunk_keywords)
-                    
-                    successful_files += 1
-                    logger.info(f"✅ {file_path}: {len(valid_chunks)} ta semantic chunk")
-                else:
-                    logger.warning(f"⚠️ Valid chunk yaratilmadi: {file_path}")
-                
-            except Exception as e:
-                logger.error(f"❌ {file_path}: {e}")
-        
-        if not all_chunks:
-            logger.error("❌ Hech qanday valid chunk yaratilmadi!")
-            return
-        
-        logger.info(f"📊 Jami {len(all_chunks)} ta chunk yaratildi")
-        
-        # 2. Advanced embedding generation
-        logger.info("🧠 Hybrid embeddings yaratilmoqda...")
-        chunk_texts = [chunk['content'] for chunk in all_chunks]
-        embeddings = self.embedder.fit_transform(chunk_texts, all_keywords)
-        
-        # 3. Database indexing
-        logger.info("💾 Advanced database indexing...")
-        self.database.add_documents(all_chunks, embeddings)
-        
-        # 4. Retriever setup
-        self.retriever = HybridRetriever(self.database, self.embedder)
-        
-        # 5. Model saving
-        self.embedder.save(self.config.EMBEDDINGS_PATH)
-        
-        self.is_ready = True
-        
-        # Final statistics
-        stats = self.database.get_stats()
-        logger.info(f"""
-        🎉 Yuqori aniqlikli qayta ishlash tugadi:
-        - ✅ Muvaffaqiyatli fayllar: {successful_files}/{len(file_paths)}
-        - 📄 Jami chunklar: {stats['total_documents']}
-        - 📁 Noyob manbalar: {stats['unique_sources']}
-        - 📏 O'rtacha chunk uzunligi: {stats['average_length']} belgi
-        - 🔧 Chunk turlari: {stats['chunk_types']}
-        """)
-        
-    def load_existing_model(self):
-        """Mavjud modelni yuklash"""
-        try:
-            if os.path.exists(self.config.EMBEDDINGS_PATH):
-                logger.info("📂 Mavjud model yuklanmoqda...")
-                self.embedder.load(self.config.EMBEDDINGS_PATH)
-                
-                stats = self.database.get_stats()
-                if stats['total_documents'] > 0:
-                    # Retriever setup
-                    self.retriever = HybridRetriever(self.database, self.embedder)
-                    self.is_ready = True
-                    
-                    logger.info(f"""
-                    ✅ Mavjud model muvaffaqiyatli yuklandi:
-                    - 📄 Jami hujjatlar: {stats['total_documents']}
-                    - 📁 Manbalar: {stats['unique_sources']}
-                    - 📊 O'rtacha uzunlik: {stats['average_length']} belgi
-                    """)
-                    return True
-                    
-        except Exception as e:
-            logger.error(f"❌ Model yuklashda xatolik: {e}")
-        
-        return False
-    
-    def query(self, question: str, top_k: int = None) -> Dict[str, Any]:
-        """Yuqori aniqlikli savol-javob"""
-        if not self.is_ready:
-            return {
-                'answer': "❌ Model hali tayyor emas. Iltimos, avval hujjatlarni qayta ishlang.",
-                'sources': [],
-                'confidence': 0.0,
-                'context_used': 0
-            }
-        
-        if top_k is None:
-            top_k = self.config.MAX_DOCS_PER_QUERY
-        
-        try:
-            logger.info(f"🔍 Query: '{question}'")
-            
-            # 1. Hybrid search
-            search_results = self.retriever.hybrid_search(question, top_k)
-            
-            if not search_results:
-                return {
-                    'answer': "🔍 Sizning savolingizga mos ma'lumot topilmadi. Iltimos, savolni boshqacha shaklda yozing yoki qo'shimcha hujjatlar yuklang.",
-                    'sources': [],
-                    'confidence': 0.0,
-                    'context_used': 0
-                }
-            
-            # 2. Context preparation
-            contexts = [result['content'] for result in search_results]
-            sources = list(set([result['source'] for result in search_results]))
-            
-            # 3. Intelligent response generation
-            answer = self.response_generator.generate_response(question, contexts, 0)
-            
-            # 4. Advanced confidence calculation
-            confidence = self.confidence_calculator.calculate_comprehensive_confidence(
-                question, search_results, answer
-            )
-            
-            # 5. Update answer with confidence
-            final_answer = self.response_generator.generate_response(question, contexts, confidence)
-            
-            logger.info(f"✅ Query completed - Confidence: {confidence:.1f}%")
-            
-            return {
-                'answer': final_answer,
-                'sources': sources,
-                'confidence': round(confidence, 1),
-                'context_used': len(search_results),
-                'search_details': {
-                    'semantic_results': len([r for r in search_results if r.get('semantic_score', 0) > 0]),
-                    'keyword_results': len([r for r in search_results if r.get('keyword_score', 0) > 0]),
-                    'bm25_results': len([r for r in search_results if r.get('bm25_score', 0) > 0]),
-                    'top_score': search_results[0].get('combined_score', 0) if search_results else 0
-                }
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ Query xatolik: {e}")
-            return {
-                'answer': "❌ Xatolik yuz berdi. Iltimos qaytadan urinib ko'ring.",
-                'sources': [],
-                'confidence': 0.0,
-                'context_used': 0
-            }
-
-def load_css_style():
-    """CSS stillarni yuklash"""
-    css_style = """
-    <style>
-    * {
-        font-family: Verdana, Geneva, Tahoma, sans-serif !important;
-    }
-
-    .main-header {
-        text-align: center;
-        background: linear-gradient(90deg, #00F700 0%, #00D600 100%);
-        padding: 1.5rem;
-        border-radius: 15px;
-        color: white;
-        margin-bottom: 2rem;
-        box-shadow: 0 4px 15px rgba(0, 247, 0, 0.3);
-    }
-
-    .main-header h1 {
-        font-size: 2.5rem;
-        margin-bottom: 0.5rem;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-    }
-
-    .main-header p {
-        font-size: 1.2rem;
-        opacity: 0.9;
-    }
-
-    .stButton > button {
-        width: 95% !important;
-        height: 60px !important;
-        border: none !important;
-        outline: none !important;
-        color: #fff !important;
-        background: #111 !important;
-        cursor: pointer !important;
-        position: relative !important;
-        z-index: 0 !important;
-        border-radius: 10px !important;
-        font-weight: bold !important;
-        font-size: 16px !important;
-        transition: all 0.3s ease !important;
-    }
-
-    .stButton > button:before {
-        content: '';
-        background: linear-gradient(45deg, #00F700, #73ff00, #fffb00, #48ff00, #00ffd5, #002bff, #7a00ff, #ff00c8, #00F700);
-        position: absolute;
-        top: -2px;
-        left: -2px;
-        background-size: 400%;
-        z-index: -1;
-        filter: blur(5px);
-        width: calc(100% + 4px);
-        height: calc(100% + 4px);
-        animation: glowing 20s linear infinite;
-        opacity: 0;
-        transition: opacity .3s ease-in-out;
-        border-radius: 10px;
-    }
-
-    .stButton > button:active {
-        color: #000 !important;
-    }
-
-    .stButton > button:active:after {
-        background: transparent !important;
-    }
-
-    .stButton > button:hover:before {
-        opacity: 1;
-    }
-
-    .stButton > button:after {
-        z-index: -1;
-        content: '';
-        position: absolute;
-        width: 100%;
-        height: 100%;
-        background: #00F700;
-        left: 0;
-        top: 0;
-        border-radius: 10px;
-    }
-
-    @keyframes glowing {
-        0% { background-position: 0 0; }
-        50% { background-position: 400% 0; }
-        100% { background-position: 0 0; }
-    }
-
-    .stat-box {
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        text-align: center;
-        margin: 0.5rem 0;
-        border: 2px solid #00F700;
-    }
-
-    .confidence-high { 
-        color: #00F700 !important; 
-        font-weight: bold !important;
-        text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
-    }
-    .confidence-medium { 
-        color: #ffc107 !important; 
-        font-weight: bold !important;
-        text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
-    }
-    .confidence-low { 
-        color: #dc3545 !important; 
-        font-weight: bold !important;
-        text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
-    }
-
-    .upload-section {
-        border: 2px dashed #00F700;
-        border-radius: 10px;
-        padding: 1rem;
-        margin: 1rem 0;
-        background: rgba(0, 247, 0, 0.05);
-    }
-
-    .sidebar-title {
-        color: #00F700 !important;
-        font-weight: bold !important;
-        font-size: 1.2rem !important;
-        margin-bottom: 1rem !important;
-    }
-
-    .metric-container {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 0.8rem;
-        border-radius: 8px;
-        margin: 0.3rem 0;
-    }
-
-    .chat-container {
-        border-radius: 10px;
-        padding: 1rem;
-        margin: 0.5rem 0;
-    }
-
-    .user-message {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border-radius: 15px 15px 5px 15px;
-        padding: 1rem;
-        margin: 0.5rem 0;
-    }
-
-    .assistant-message {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        color: white;
-        border-radius: 15px 15px 15px 5px;
-        padding: 1rem;
-        margin: 0.5rem 0;
-    }
-
-    .processing-indicator {
-        background: linear-gradient(45deg, #00F700, #73ff00);
-        color: white;
-        padding: 1rem;
-        border-radius: 10px;
-        text-align: center;
-        animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-        0% { opacity: 1; }
-        50% { opacity: 0.7; }
-        100% { opacity: 1; }
-    }
-    </style>
-    """
-    return css_style
-
-def create_advanced_streamlit_interface():
-    """Ilg'or Streamlit interface"""
-    
-    st.set_page_config(
-        page_title="CHATBOT",
-        page_icon="🎯",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    
-    # Apply custom CSS
-    st.markdown(load_css_style(), unsafe_allow_html=True)
-    
-    # Header
-    st.markdown("""
-    <div class="main-header">
-        <h1>🎯 CHATBOT</h1>
-        <p>Yuqori aniqlikli AI yordamchisi - API-siz, to'liq offline</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Session state initialization
-    if 'rag_pipeline' not in st.session_state:
-        st.session_state.rag_pipeline = HighAccuracyRAGPipeline()
-        # Auto-load existing model
-        st.session_state.rag_pipeline.load_existing_model()
-    
-    if 'messages' not in st.session_state:
-        st.session_state.messages = []
-    
-    if 'processing_stats' not in st.session_state:
-        st.session_state.processing_stats = {}
-    
-    # Sidebar
-    with st.sidebar:
-        st.markdown('<h2 class="sidebar-title">⚙️ Boshqaruv Paneli</h2>', unsafe_allow_html=True)
-        
-        # Model status
-        if st.session_state.rag_pipeline.is_ready:
-            st.success("✅ Model tayyor")
-            stats = st.session_state.rag_pipeline.database.get_stats()
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown(f'<div class="metric-container">📄 Hujjatlar<br><strong>{stats["total_documents"]}</strong></div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="metric-container">📏 O\'rtacha uzunlik<br><strong>{stats["average_length"]:.0f}</strong></div>', unsafe_allow_html=True)
-            with col2:
-                st.markdown(f'<div class="metric-container">📁 Manbalar<br><strong>{stats["unique_sources"]}</strong></div>', unsafe_allow_html=True)
-                if 'chunk_types' in stats:
-                    semantic_count = stats['chunk_types'].get('semantic', 0)
-                    st.markdown(f'<div class="metric-container">🧠 Semantic chunks<br><strong>{semantic_count}</strong></div>', unsafe_allow_html=True)
-        else:
-            st.warning("⚠️ Model hali tayyor emas")
-        
-        st.markdown("---")
-        
-        # Configuration
-        st.subheader("🔧 Sozlamalar")
-        
-        chunk_size = st.slider("Chunk o'lchami", 150, 400, 
-                              st.session_state.rag_pipeline.config.CHUNK_SIZE)
-        
-        max_docs = st.slider("Maksimal contextlar", 5, 20, 
-                           st.session_state.rag_pipeline.config.MAX_DOCS_PER_QUERY)
-        
-        # Update config
-        st.session_state.rag_pipeline.config.CHUNK_SIZE = chunk_size
-        st.session_state.rag_pipeline.config.MAX_DOCS_PER_QUERY = max_docs
-        
-        st.markdown("---")
-        
-        # File upload
-        st.markdown('<div class="upload-section">', unsafe_allow_html=True)
-        st.subheader("📤 Hujjat yuklash")
-        
-        # File uploader with improved handling
-        uploaded_files = st.file_uploader(
-            "Fayllarni tanlang",
-            type=['pdf', 'docx', 'txt', 'html', 'md'],
-            accept_multiple_files=True,
-            help="Qo'llab-quvvatlanuvchi formatlar: PDF, DOCX, TXT, HTML, MD"
-        )
-        
-        # Show uploaded files
-        if uploaded_files:
-            st.write("**Yuklangan fayllar:**")
-            for file in uploaded_files:
-                file_size = len(file.getvalue()) / 1024 / 1024  # MB
-                st.write(f"📄 {file.name} ({file_size:.1f} MB)")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Processing button
-        col1, col2 = st.columns(2)
-        with col1:
-            process_btn = st.button("🚀 Qayta ishlash", disabled=not uploaded_files, use_container_width=True)
-        with col2:
-            clear_btn = st.button("🗑️ Tozalash", use_container_width=True)
-        
-        # Processing with comprehensive error handling and debugging
-        if process_btn and uploaded_files:
-            # Create temporary directory
-            temp_dir = Path("./temp_uploads")
-            temp_dir.mkdir(exist_ok=True)
-            
-            # Initialize variables
-            temp_paths = []
-            
-            try:
-                # Phase 1: File saving
-                st.info("📁 1-bosqich: Fayllar saqlanmoqda...")
-                progress_bar = st.progress(0)
-                
-                total_files = len(uploaded_files)
-                for i, uploaded_file in enumerate(uploaded_files):
-                    try:
-                        # Progress update
-                        progress = (i + 1) / total_files * 0.2
-                        progress_bar.progress(progress)
-                        
-                        # Create safe filename
-                        original_name = uploaded_file.name
-                        safe_name = re.sub(r'[^\w\-_\.]', '_', original_name)
-                        if not safe_name:
-                            safe_name = f"document_{i}.txt"
-                        
-                        temp_path = temp_dir / f"{i}_{safe_name}"
-                        
-                        # Save file
-                        file_content = uploaded_file.read()
-                        if len(file_content) == 0:
-                            st.warning(f"⚠️ Bo'sh fayl: {original_name}")
-                            continue
-                            
-                        with open(temp_path, "wb") as f:
-                            f.write(file_content)
-                        
-                        temp_paths.append(str(temp_path))
-                        st.success(f"✅ Saqlandi: {original_name} ({len(file_content)} bytes)")
-                        
-                    except Exception as e:
-                        st.error(f"❌ {uploaded_file.name} saqlashda xatolik: {str(e)}")
-                        continue
-                
-                if not temp_paths:
-                    st.error("❌ Hech qanday fayl saqlanmadi!")
-                    return
-                
-                st.success(f"✅ {len(temp_paths)} ta fayl muvaffaqiyatli saqlandi")
-                
-                # Phase 2: Document processing
-                st.info("🧠 2-bosqich: Hujjatlar qayta ishlanmoqda...")
-                progress_bar.progress(0.3)
-                
-                # Test document loading first
-                doc_loader = AdvancedDocumentLoader()
-                loaded_texts = []
-                
-                for i, temp_path in enumerate(temp_paths):
-                    try:
-                        progress = 0.3 + (i + 1) / len(temp_paths) * 0.2
-                        progress_bar.progress(progress)
-                        
-                        text = doc_loader.load_document(temp_path)
-                        if text and len(text.strip()) > 10:
-                            loaded_texts.append((temp_path, text))
-                            st.info(f"📄 Yuklandi: {Path(temp_path).name} ({len(text)} belgi)")
-                        else:
-                            st.warning(f"⚠️ Bo'sh yoki juda qisqa matn: {Path(temp_path).name}")
-                    except Exception as e:
-                        st.error(f"❌ {Path(temp_path).name} yuklashda xatolik: {str(e)}")
-                        continue
-                
-                if not loaded_texts:
-                    st.error("❌ Hech qanday matn yuklanmadi!")
-                    return
-                
-                st.success(f"✅ {len(loaded_texts)} ta hujjat matnlari yuklandi")
-                
-                # Phase 3: Create new pipeline and process
-                st.info("⚙️ 3-bosqich: RAG pipeline yaratilmoqda...")
-                progress_bar.progress(0.6)
-                
-                # Create completely fresh pipeline
-                new_config = HighAccuracyConfig()
-                new_pipeline = HighAccuracyRAGPipeline(new_config)
-                
-                # Process each document step by step
-                all_chunks = []
-                all_keywords = []
-                
-                for i, (file_path, text) in enumerate(loaded_texts):
-                    try:
-                        progress = 0.6 + (i + 1) / len(loaded_texts) * 0.2
-                        progress_bar.progress(progress)
-                        
-                        # Create chunks
-                        chunks = new_pipeline.chunker.chunk_by_semantic_similarity(text, source=Path(file_path).name)
-                        valid_chunks = [chunk for chunk in chunks if chunk is not None]
-                        
-                        if valid_chunks:
-                            all_chunks.extend(valid_chunks)
-                            chunk_keywords = [chunk.get('keywords', []) for chunk in valid_chunks]
-                            all_keywords.extend(chunk_keywords)
-                            st.info(f"🔧 {Path(file_path).name}: {len(valid_chunks)} chunk yaratildi")
-                        else:
-                            st.warning(f"⚠️ {Path(file_path).name}: chunk yaratilmadi")
-                            
-                    except Exception as e:
-                        st.error(f"❌ {Path(file_path).name} chunking xatolik: {str(e)}")
-                        continue
-                
-                if not all_chunks:
-                    st.error("❌ Hech qanday chunk yaratilmadi!")
-                    return
-                
-                st.success(f"✅ Jami {len(all_chunks)} ta chunk yaratildi")
-                
-                # Phase 4: Create embeddings
-                st.info("🧠 4-bosqich: Embeddings yaratilmoqda...")
-                progress_bar.progress(0.8)
-                
-                try:
-                    chunk_texts = [chunk['content'] for chunk in all_chunks]
-                    embeddings = new_pipeline.embedder.fit_transform(chunk_texts, all_keywords)
-                    st.success(f"✅ Embeddings yaratildi: {embeddings.shape}")
-                except Exception as e:
-                    st.error(f"❌ Embeddings yaratishda xatolik: {str(e)}")
-                    return
-                
-                # Phase 5: Save to database
-                st.info("💾 5-bosqich: Database ga saqlash...")
-                progress_bar.progress(0.9)
-                
-                try:
-                    new_pipeline.database.add_documents(all_chunks, embeddings)
-                    new_pipeline.retriever = HybridRetriever(new_pipeline.database, new_pipeline.embedder)
-                    new_pipeline.embedder.save(new_pipeline.config.EMBEDDINGS_PATH)
-                    new_pipeline.is_ready = True
-                    st.success("✅ Database ga saqlandi")
-                except Exception as e:
-                    st.error(f"❌ Database ga saqlashda xatolik: {str(e)}")
-                    return
-                
-                # Phase 6: Final verification and replacement
-                st.info("✅ 6-bosqich: Yakuniy tekshirish...")
-                progress_bar.progress(0.95)
-                
-                # Verify everything works
-                try:
-                    test_stats = new_pipeline.database.get_stats()
-                    if test_stats['total_documents'] > 0 and new_pipeline.is_ready:
-                        # Replace the session pipeline
-                        st.session_state.rag_pipeline = new_pipeline
-                        
-                        progress_bar.progress(1.0)
-                        
-                        # Show final success
-                        success_msg = f"""
-                        🎉 **MUVAFFAQIYAT!**
-                        
-                        ✅ **Jami hujjatlar:** {test_stats['total_documents']}  
-                        ✅ **Noyob manbalar:** {test_stats['unique_sources']}  
-                        ✅ **O'rtacha uzunlik:** {test_stats['average_length']:.0f} belgi  
-                        ✅ **Model holati:** Tayyor  
-                        
-                        Endi savollaringizni bering! 🚀
-                        """
-                        st.balloons()
-                        st.success(success_msg)
-                        
-                        # Auto-refresh after success
-                        import time
-                        time.sleep(3)
-                        st.rerun()
-                        
-                    else:
-                        st.error("❌ Model tekshiruvdan o'tmadi!")
-                        
-                except Exception as e:
-                    st.error(f"❌ Yakuniy tekshiruvda xatolik: {str(e)}")
-                
-            except Exception as e:
-                st.error(f"❌ Umumiy xatolik: {str(e)}")
-                import traceback
-                st.code(traceback.format_exc())
-                
-            finally:
-                # Cleanup temp files
-                for temp_path in temp_paths:
-                    try:
-                        if os.path.exists(temp_path):
-                            os.remove(temp_path)
-                    except:
-                        pass
-                try:
-                    if temp_dir.exists():
-                        import shutil
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                except:
-                    pass
-        
-        # Clear data
-        if clear_btn:
-            if st.session_state.get('clear_confirmed', False):
-                try:
-                    # Remove database and embeddings
-                    if os.path.exists(st.session_state.rag_pipeline.config.DATABASE_PATH):
-                        os.remove(st.session_state.rag_pipeline.config.DATABASE_PATH)
-                    if os.path.exists(st.session_state.rag_pipeline.config.EMBEDDINGS_PATH):
-                        os.remove(st.session_state.rag_pipeline.config.EMBEDDINGS_PATH)
-                    
-                    # Reset pipeline
-                    st.session_state.rag_pipeline = HighAccuracyRAGPipeline()
-                    st.session_state.messages = []
-                    st.session_state.clear_confirmed = False
-                    
-                    st.success("✅ Ma'lumotlar tozalandi!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Tozalash xatolik: {e}")
+        # Generate response
+        with st.chat_message("assistant"):
+            if not st.session_state.rag_pipeline.is_ready:
+                response_text = "❌ Model hali tayyor emas. Iltimos, avval hujjatlarni yuklang."
+                st.markdown(response_text)
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": response_text
+                })
             else:
-                st.session_state.clear_confirmed = True
-                st.warning("⚠️ Haqiqatan ham barcha ma'lumotlarni o'chirmoqchimisiz? Qayta bosing.")
-    
-    # Main chat interface
-    st.header("💬 Yuqori Aniqlikli Suhbat")
-    
-    # Chat container
-    chat_container = st.container()
-    
-    with chat_container:
-        # Display chat messages
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+                with st.spinner("🧠 Javob tayyorlanmoqda..."):
+                    response = st.session_state.rag_pipeline.query(prompt)
                 
-                # Additional info for assistant messages
-                if message["role"] == "assistant":
-                    if "confidence" in message:
-                        confidence = message["confidence"]
-                        if confidence >= 80:
-                            conf_class = "confidence-high"
-                            conf_icon = "🎯"
-                        elif confidence >= 60:
-                            conf_class = "confidence-medium"
-                            conf_icon = "⚡"
-                        else:
-                            conf_class = "confidence-low"
-                            conf_icon = "⚠️"
-                        
-                        st.markdown(f"""
-                        <div style="margin: 1rem 0;">
-                            <span class="{conf_class}">{conf_icon} Ishonchlilik: {confidence}%</span>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    # Sources
-                    if "sources" in message and message["sources"]:
-                        with st.expander("📚 Manbalar"):
-                            for i, source in enumerate(message["sources"], 1):
-                                st.write(f"{i}. {source}")
-                    
-                    # Search details
-                    if "search_details" in message:
-                        details = message["search_details"]
-                        with st.expander("🔍 Qidiruv tafsilotlari"):
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Semantic", details.get('semantic_results', 0))
-                            with col2:
-                                st.metric("Keyword", details.get('keyword_results', 0))
-                            with col3:
-                                st.metric("BM25", details.get('bm25_results', 0))
-                            
-                            st.metric("Top Score", f"{details.get('top_score', 0):.3f}")
-    
-    # Chat input
-    if prompt := st.chat_input("Savolingizni yozing... (Yuqori aniqlik rejimida)"):
-        # Add user message
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        
-        with chat_container:
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            
-            # Generate response
-            with st.chat_message("assistant"):
-                if not st.session_state.rag_pipeline.is_ready:
-                    response_text = "❌ Model hali tayyor emas. Iltimos, avval hujjatlarni yuklang va qayta ishlang."
-                    st.markdown(response_text)
-                    
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": response_text
-                    })
+                st.markdown(response['answer'])
+                
+                # Display confidence
+                confidence = response['confidence']
+                if confidence >= 80:
+                    conf_class = "confidence-high"
+                    conf_icon = "🎯"
+                elif confidence >= 60:
+                    conf_class = "confidence-medium"
+                    conf_icon = "⚡"
                 else:
-                    with st.spinner("🧠 Yuqori aniqlikda javob tayyorlanmoqda..."):
-                        response = st.session_state.rag_pipeline.query(prompt)
-                    
-                    # Display response
-                    st.markdown(response['answer'])
-                    
-                    # Confidence display
-                    confidence = response['confidence']
-                    if confidence >= 80:
-                        conf_class = "confidence-high"
-                        conf_icon = "🎯"
-                    elif confidence >= 60:
-                        conf_class = "confidence-medium"
-                        conf_icon = "⚡"
-                    else:
-                        conf_class = "confidence-low"
-                        conf_icon = "⚠️"
-                    
-                    st.markdown(f"""
-                    <div style="margin: 1rem 0;">
-                        <span class="{conf_class}">{conf_icon} Ishonchlilik: {confidence}%</span>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Sources
-                    if response['sources']:
-                        with st.expander("📚 Manbalar"):
-                            for i, source in enumerate(response['sources'], 1):
-                                st.write(f"{i}. {source}")
-                    
-                    # Search details
-                    if 'search_details' in response:
-                        details = response['search_details']
-                        with st.expander("🔍 Qidiruv tafsilotlari"):
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Semantic", details.get('semantic_results', 0))
-                            with col2:
-                                st.metric("Keyword", details.get('keyword_results', 0))
-                            with col3:
-                                st.metric("BM25", details.get('bm25_results', 0))
-                            
-                            st.metric("Top Score", f"{details.get('top_score', 0):.3f}")
-                    
-                    # Save message
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": response['answer'],
-                        "confidence": response['confidence'],
-                        "sources": response['sources'],
-                        "search_details": response.get('search_details', {})
-                    })
+                    conf_class = "confidence-low"
+                    conf_icon = "⚠️"
+                
+                st.markdown(f"""
+                <div style="margin: 1rem 0;">
+                    <span class="{conf_class}">{conf_icon} Ishonchlilik: {confidence}%</span>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Show sources
+                if response['sources']:
+                    with st.expander("📚 Manbalar"):
+                        for i, source in enumerate(response['sources'], 1):
+                            st.write(f"{i}. {source}")
+                
+                # Save message
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": response['answer'],
+                    "confidence": response['confidence'],
+                    "sources": response['sources']
+                })
 
 if __name__ == "__main__":
-    # Run interface
     create_advanced_streamlit_interface()
