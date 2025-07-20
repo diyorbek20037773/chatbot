@@ -1983,110 +1983,208 @@ def create_advanced_streamlit_interface():
         with col2:
             clear_btn = st.button("🗑️ Tozalash", use_container_width=True)
         
-        # Processing with improved error handling and auto-processing
+        # Processing with comprehensive error handling and debugging
         if process_btn and uploaded_files:
             # Create temporary directory
             temp_dir = Path("./temp_uploads")
             temp_dir.mkdir(exist_ok=True)
             
-            progress_container = st.container()
-            with progress_container:
-                st.markdown('<div class="processing-indicator">🔄 Yuqori aniqlikda qayta ishlanmoqda...</div>', unsafe_allow_html=True)
-                
-                # Progress tracking
+            # Initialize variables
+            temp_paths = []
+            
+            try:
+                # Phase 1: File saving
+                st.info("📁 1-bosqich: Fayllar saqlanmoqda...")
                 progress_bar = st.progress(0)
-                status_text = st.empty()
+                
+                total_files = len(uploaded_files)
+                for i, uploaded_file in enumerate(uploaded_files):
+                    try:
+                        # Progress update
+                        progress = (i + 1) / total_files * 0.2
+                        progress_bar.progress(progress)
+                        
+                        # Create safe filename
+                        original_name = uploaded_file.name
+                        safe_name = re.sub(r'[^\w\-_\.]', '_', original_name)
+                        if not safe_name:
+                            safe_name = f"document_{i}.txt"
+                        
+                        temp_path = temp_dir / f"{i}_{safe_name}"
+                        
+                        # Save file
+                        file_content = uploaded_file.read()
+                        if len(file_content) == 0:
+                            st.warning(f"⚠️ Bo'sh fayl: {original_name}")
+                            continue
+                            
+                        with open(temp_path, "wb") as f:
+                            f.write(file_content)
+                        
+                        temp_paths.append(str(temp_path))
+                        st.success(f"✅ Saqlandi: {original_name} ({len(file_content)} bytes)")
+                        
+                    except Exception as e:
+                        st.error(f"❌ {uploaded_file.name} saqlashda xatolik: {str(e)}")
+                        continue
+                
+                if not temp_paths:
+                    st.error("❌ Hech qanday fayl saqlanmadi!")
+                    return
+                
+                st.success(f"✅ {len(temp_paths)} ta fayl muvaffaqiyatli saqlandi")
+                
+                # Phase 2: Document processing
+                st.info("🧠 2-bosqich: Hujjatlar qayta ishlanmoqda...")
+                progress_bar.progress(0.3)
+                
+                # Test document loading first
+                doc_loader = AdvancedDocumentLoader()
+                loaded_texts = []
+                
+                for i, temp_path in enumerate(temp_paths):
+                    try:
+                        progress = 0.3 + (i + 1) / len(temp_paths) * 0.2
+                        progress_bar.progress(progress)
+                        
+                        text = doc_loader.load_document(temp_path)
+                        if text and len(text.strip()) > 10:
+                            loaded_texts.append((temp_path, text))
+                            st.info(f"📄 Yuklandi: {Path(temp_path).name} ({len(text)} belgi)")
+                        else:
+                            st.warning(f"⚠️ Bo'sh yoki juda qisqa matn: {Path(temp_path).name}")
+                    except Exception as e:
+                        st.error(f"❌ {Path(temp_path).name} yuklashda xatolik: {str(e)}")
+                        continue
+                
+                if not loaded_texts:
+                    st.error("❌ Hech qanday matn yuklanmadi!")
+                    return
+                
+                st.success(f"✅ {len(loaded_texts)} ta hujjat matnlari yuklandi")
+                
+                # Phase 3: Create new pipeline and process
+                st.info("⚙️ 3-bosqich: RAG pipeline yaratilmoqda...")
+                progress_bar.progress(0.6)
+                
+                # Create completely fresh pipeline
+                new_config = HighAccuracyConfig()
+                new_pipeline = HighAccuracyRAGPipeline(new_config)
+                
+                # Process each document step by step
+                all_chunks = []
+                all_keywords = []
+                
+                for i, (file_path, text) in enumerate(loaded_texts):
+                    try:
+                        progress = 0.6 + (i + 1) / len(loaded_texts) * 0.2
+                        progress_bar.progress(progress)
+                        
+                        # Create chunks
+                        chunks = new_pipeline.chunker.chunk_by_semantic_similarity(text, source=Path(file_path).name)
+                        valid_chunks = [chunk for chunk in chunks if chunk is not None]
+                        
+                        if valid_chunks:
+                            all_chunks.extend(valid_chunks)
+                            chunk_keywords = [chunk.get('keywords', []) for chunk in valid_chunks]
+                            all_keywords.extend(chunk_keywords)
+                            st.info(f"🔧 {Path(file_path).name}: {len(valid_chunks)} chunk yaratildi")
+                        else:
+                            st.warning(f"⚠️ {Path(file_path).name}: chunk yaratilmadi")
+                            
+                    except Exception as e:
+                        st.error(f"❌ {Path(file_path).name} chunking xatolik: {str(e)}")
+                        continue
+                
+                if not all_chunks:
+                    st.error("❌ Hech qanday chunk yaratilmadi!")
+                    return
+                
+                st.success(f"✅ Jami {len(all_chunks)} ta chunk yaratildi")
+                
+                # Phase 4: Create embeddings
+                st.info("🧠 4-bosqich: Embeddings yaratilmoqda...")
+                progress_bar.progress(0.8)
                 
                 try:
-                    # Save files with better handling
-                    temp_paths = []
-                    total_files = len(uploaded_files)
-                    
-                    status_text.text("📁 Fayllar saqlanmoqda...")
-                    for i, uploaded_file in enumerate(uploaded_files):
-                        progress_bar.progress((i + 1) / total_files * 0.2)
+                    chunk_texts = [chunk['content'] for chunk in all_chunks]
+                    embeddings = new_pipeline.embedder.fit_transform(chunk_texts, all_keywords)
+                    st.success(f"✅ Embeddings yaratildi: {embeddings.shape}")
+                except Exception as e:
+                    st.error(f"❌ Embeddings yaratishda xatolik: {str(e)}")
+                    return
+                
+                # Phase 5: Save to database
+                st.info("💾 5-bosqich: Database ga saqlash...")
+                progress_bar.progress(0.9)
+                
+                try:
+                    new_pipeline.database.add_documents(all_chunks, embeddings)
+                    new_pipeline.retriever = HybridRetriever(new_pipeline.database, new_pipeline.embedder)
+                    new_pipeline.embedder.save(new_pipeline.config.EMBEDDINGS_PATH)
+                    new_pipeline.is_ready = True
+                    st.success("✅ Database ga saqlandi")
+                except Exception as e:
+                    st.error(f"❌ Database ga saqlashda xatolik: {str(e)}")
+                    return
+                
+                # Phase 6: Final verification and replacement
+                st.info("✅ 6-bosqich: Yakuniy tekshirish...")
+                progress_bar.progress(0.95)
+                
+                # Verify everything works
+                try:
+                    test_stats = new_pipeline.database.get_stats()
+                    if test_stats['total_documents'] > 0 and new_pipeline.is_ready:
+                        # Replace the session pipeline
+                        st.session_state.rag_pipeline = new_pipeline
                         
-                        # Safe filename
-                        safe_filename = "".join(c for c in uploaded_file.name if c.isalnum() or c in "._-")
-                        if not safe_filename:
-                            safe_filename = f"file_{i}"
-                        temp_path = temp_dir / f"{i}_{safe_filename}"
-                        
-                        # Write file with error handling
-                        try:
-                            file_content = uploaded_file.getbuffer()
-                            with open(temp_path, "wb") as f:
-                                f.write(file_content)
-                            temp_paths.append(str(temp_path))
-                            logger.info(f"Fayl saqlandi: {temp_path}")
-                        except Exception as e:
-                            st.error(f"❌ Fayl saqlashda xatolik {uploaded_file.name}: {e}")
-                            logger.error(f"File save error for {uploaded_file.name}: {e}")
-                            continue
-                    
-                    if not temp_paths:
-                        st.error("❌ Hech qanday fayl saqlanmadi!")
-                        return
-                    
-                    status_text.text(f"✅ {len(temp_paths)} ta fayl saqlandi")
-                    progress_bar.progress(0.3)
-                    
-                    # Process documents
-                    status_text.text("🧠 Hujjatlar qayta ishlanmoqda...")
-                    progress_bar.progress(0.4)
-                    
-                    # Create new pipeline instance to avoid conflicts
-                    temp_pipeline = HighAccuracyRAGPipeline()
-                    temp_pipeline.process_documents(temp_paths)
-                    
-                    # Replace current pipeline
-                    st.session_state.rag_pipeline = temp_pipeline
-                    
-                    progress_bar.progress(0.9)
-                    status_text.text("💾 Model saqlanmoqda...")
-                    
-                    # Verify the model is ready
-                    if st.session_state.rag_pipeline.is_ready:
                         progress_bar.progress(1.0)
-                        status_text.text("✅ Muvaffaqiyatli tugadi!")
                         
-                        # Show success message
-                        final_stats = st.session_state.rag_pipeline.database.get_stats()
+                        # Show final success
                         success_msg = f"""
-                        🎉 **Qayta ishlash muvaffaqiyatli tugadi!**
-                        - 📄 Jami chunklar: {final_stats['total_documents']}
-                        - 📁 Manbalar: {final_stats['unique_sources']}
-                        - 📏 O'rtacha uzunlik: {final_stats['average_length']:.0f} belgi
+                        🎉 **MUVAFFAQIYAT!**
+                        
+                        ✅ **Jami hujjatlar:** {test_stats['total_documents']}  
+                        ✅ **Noyob manbalar:** {test_stats['unique_sources']}  
+                        ✅ **O'rtacha uzunlik:** {test_stats['average_length']:.0f} belgi  
+                        ✅ **Model holati:** Tayyor  
+                        
+                        Endi savollaringizni bering! 🚀
                         """
+                        st.balloons()
                         st.success(success_msg)
                         
-                        # Clear progress after success
+                        # Auto-refresh after success
                         import time
                         time.sleep(3)
-                        progress_container.empty()
                         st.rerun()
+                        
                     else:
-                        st.error("❌ Model tayyor emas. Qayta urinib ko'ring.")
-                    
+                        st.error("❌ Model tekshiruvdan o'tmadi!")
+                        
                 except Exception as e:
-                    st.error(f"❌ Qayta ishlashda xatolik: {e}")
-                    logger.error(f"Processing error: {e}")
-                    import traceback
-                    logger.error(f"Full traceback: {traceback.format_exc()}")
-                finally:
-                    # Clean up temp files
-                    for temp_path in temp_paths:
-                        try:
-                            if os.path.exists(temp_path):
-                                os.remove(temp_path)
-                                logger.info(f"Temp file cleaned: {temp_path}")
-                        except Exception as e:
-                            logger.warning(f"Could not remove temp file {temp_path}: {e}")
+                    st.error(f"❌ Yakuniy tekshiruvda xatolik: {str(e)}")
+                
+            except Exception as e:
+                st.error(f"❌ Umumiy xatolik: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
+                
+            finally:
+                # Cleanup temp files
+                for temp_path in temp_paths:
                     try:
-                        if temp_dir.exists() and not list(temp_dir.iterdir()):
-                            temp_dir.rmdir()
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
                     except:
                         pass
+                try:
+                    if temp_dir.exists():
+                        import shutil
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                except:
+                    pass
         
         # Clear data
         if clear_btn:
