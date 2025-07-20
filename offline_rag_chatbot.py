@@ -38,17 +38,78 @@ from rank_bm25 import BM25Okapi
 import streamlit as st
 import pandas as pd
 
-# NLTK downloads
+# NLTK downloads with comprehensive error handling
 def download_nltk_data():
-    required_data = ['punkt', 'stopwords', 'averaged_perceptron_tagger', 'wordnet']
+    """Download all required NLTK data with fallbacks"""
+    required_data = [
+        'punkt', 
+        'punkt_tab',  # New requirement in latest NLTK
+        'stopwords', 
+        'averaged_perceptron_tagger', 
+        'wordnet',
+        'omw-1.4'  # Additional wordnet data
+    ]
+    
     for data in required_data:
         try:
-            nltk.data.find(f'tokenizers/{data}')
-        except LookupError:
+            # Try to find existing data
+            if data == 'punkt_tab':
+                try:
+                    nltk.data.find('tokenizers/punkt_tab')
+                    continue
+                except LookupError:
+                    pass
+            else:
+                try:
+                    nltk.data.find(f'tokenizers/{data}')
+                    continue
+                except LookupError:
+                    try:
+                        nltk.data.find(f'corpora/{data}')
+                        continue
+                    except LookupError:
+                        pass
+            
+            # Download if not found
+            print(f"Downloading NLTK data: {data}")
             try:
                 nltk.download(data, quiet=True)
+                print(f"✅ Successfully downloaded: {data}")
+            except Exception as e:
+                print(f"⚠️ Could not download {data}: {e}")
+                # Try alternative downloads
+                if data == 'punkt_tab':
+                    try:
+                        nltk.download('punkt', quiet=True)
+                        print("✅ Downloaded punkt as fallback")
+                    except:
+                        pass
+                        
+        except Exception as e:
+            print(f"❌ Error with {data}: {e}")
+            continue
+
+# Safe sentence tokenization with fallbacks
+def safe_sent_tokenize(text):
+    """Safe sentence tokenization with multiple fallbacks"""
+    try:
+        # Try modern punkt_tab first
+        return sent_tokenize(text)
+    except LookupError:
+        try:
+            # Try downloading punkt_tab
+            nltk.download('punkt_tab', quiet=True)
+            return sent_tokenize(text)
+        except:
+            try:
+                # Fallback to punkt
+                nltk.download('punkt', quiet=True)
+                return sent_tokenize(text)
             except:
-                pass
+                # Manual sentence splitting as last resort
+                import re
+                sentences = re.split(r'[.!?]+', text)
+                return [s.strip() for s in sentences if s.strip()]
 
 download_nltk_data()
 
@@ -321,7 +382,7 @@ class SemanticChunker:
     
     def chunk_by_sentences(self, text: str, source: str = "") -> List[Dict]:
         """Jumlalar bo'yicha chunking (fallback)"""
-        sentences = sent_tokenize(text)
+        sentences = safe_sent_tokenize(text)
         chunks = []
         current_sentences = []
         current_length = 0
@@ -351,7 +412,7 @@ class SemanticChunker:
     
     def chunk_large_paragraph(self, paragraph: str, source: str, start_id: int) -> List[Dict]:
         """Katta paragrafni kichik chunklarga bo'lish"""
-        sentences = sent_tokenize(paragraph)
+        sentences = safe_sent_tokenize(paragraph)
         chunks = []
         current_sentences = []
         current_length = 0
@@ -1146,7 +1207,7 @@ class IntelligentResponseGenerator:
     
     def create_summary(self, text: str, max_sentences: int = 3) -> str:
         """Matn xulosasi yaratish"""
-        sentences = sent_tokenize(text)
+        sentences = safe_sent_tokenize(text)
         if len(sentences) <= max_sentences:
             return text
         
@@ -1190,7 +1251,7 @@ class IntelligentResponseGenerator:
             r'first|second|third|then|next|finally'
         ]
         
-        sentences = sent_tokenize(text)
+        sentences = safe_sent_tokenize(text)
         steps = []
         
         for sentence in sentences:
