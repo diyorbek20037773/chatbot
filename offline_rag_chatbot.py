@@ -284,17 +284,21 @@ class SemanticChunker:
             if para_length > self.chunk_size * 1.5:
                 # Oldingi chunkni saqlash
                 if current_chunk_paras:
-                    chunks.append(self.create_chunk(current_chunk_paras, source, len(chunks)))
+                    chunk = self.create_chunk(current_chunk_paras, source, len(chunks))
+                    if chunk:
+                        chunks.append(chunk)
                     current_chunk_paras = []
                     current_length = 0
                 
                 # Katta paragrafni jumlalarga bo'lish
                 para_chunks = self.chunk_large_paragraph(para, source, len(chunks))
-                chunks.extend(para_chunks)
+                chunks.extend([c for c in para_chunks if c])
                 
             elif current_length + para_length > self.chunk_size and current_chunk_paras:
                 # Chunk yaratish
-                chunks.append(self.create_chunk(current_chunk_paras, source, len(chunks)))
+                chunk = self.create_chunk(current_chunk_paras, source, len(chunks))
+                if chunk:
+                    chunks.append(chunk)
                 
                 # Overlap uchun oxirgi paragrafni saqlab qolish
                 overlap_paras = self.get_overlap_paragraphs(current_chunk_paras)
@@ -309,7 +313,9 @@ class SemanticChunker:
         
         # Oxirgi chunkni qo'shish
         if current_chunk_paras:
-            chunks.append(self.create_chunk(current_chunk_paras, source, len(chunks)))
+            chunk = self.create_chunk(current_chunk_paras, source, len(chunks))
+            if chunk:
+                chunks.append(chunk)
         
         return chunks
     
@@ -324,7 +330,9 @@ class SemanticChunker:
             sentence_length = len(sentence)
             
             if current_length + sentence_length > self.chunk_size and current_sentences:
-                chunks.append(self.create_chunk_from_sentences(current_sentences, source, len(chunks)))
+                chunk = self.create_chunk_from_sentences(current_sentences, source, len(chunks))
+                if chunk:
+                    chunks.append(chunk)
                 
                 # Overlap
                 overlap_sentences = current_sentences[-1:] if current_sentences else []
@@ -335,7 +343,9 @@ class SemanticChunker:
             current_length += sentence_length
         
         if current_sentences:
-            chunks.append(self.create_chunk_from_sentences(current_sentences, source, len(chunks)))
+            chunk = self.create_chunk_from_sentences(current_sentences, source, len(chunks))
+            if chunk:
+                chunks.append(chunk)
         
         return chunks
     
@@ -350,9 +360,11 @@ class SemanticChunker:
             sentence_length = len(sentence)
             
             if current_length + sentence_length > self.chunk_size and current_sentences:
-                chunks.append(self.create_chunk_from_sentences(
+                chunk = self.create_chunk_from_sentences(
                     current_sentences, source, start_id + len(chunks)
-                ))
+                )
+                if chunk:
+                    chunks.append(chunk)
                 current_sentences = []
                 current_length = 0
             
@@ -360,9 +372,11 @@ class SemanticChunker:
             current_length += sentence_length
         
         if current_sentences:
-            chunks.append(self.create_chunk_from_sentences(
+            chunk = self.create_chunk_from_sentences(
                 current_sentences, source, start_id + len(chunks)
-            ))
+            )
+            if chunk:
+                chunks.append(chunk)
         
         return chunks
     
@@ -1690,44 +1704,203 @@ class HighAccuracyRAGPipeline:
                 'context_used': 0
             }
 
+def load_css_style():
+    """CSS stillarni yuklash"""
+    css_style = """
+    <style>
+    * {
+        font-family: Verdana, Geneva, Tahoma, sans-serif !important;
+    }
+
+    .main-header {
+        text-align: center;
+        background: linear-gradient(90deg, #00F700 0%, #00D600 100%);
+        padding: 1.5rem;
+        border-radius: 15px;
+        color: white;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 15px rgba(0, 247, 0, 0.3);
+    }
+
+    .main-header h1 {
+        font-size: 2.5rem;
+        margin-bottom: 0.5rem;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+
+    .main-header p {
+        font-size: 1.2rem;
+        opacity: 0.9;
+    }
+
+    .stButton > button {
+        width: 95% !important;
+        height: 60px !important;
+        border: none !important;
+        outline: none !important;
+        color: #fff !important;
+        background: #111 !important;
+        cursor: pointer !important;
+        position: relative !important;
+        z-index: 0 !important;
+        border-radius: 10px !important;
+        font-weight: bold !important;
+        font-size: 16px !important;
+        transition: all 0.3s ease !important;
+    }
+
+    .stButton > button:before {
+        content: '';
+        background: linear-gradient(45deg, #00F700, #73ff00, #fffb00, #48ff00, #00ffd5, #002bff, #7a00ff, #ff00c8, #00F700);
+        position: absolute;
+        top: -2px;
+        left: -2px;
+        background-size: 400%;
+        z-index: -1;
+        filter: blur(5px);
+        width: calc(100% + 4px);
+        height: calc(100% + 4px);
+        animation: glowing 20s linear infinite;
+        opacity: 0;
+        transition: opacity .3s ease-in-out;
+        border-radius: 10px;
+    }
+
+    .stButton > button:active {
+        color: #000 !important;
+    }
+
+    .stButton > button:active:after {
+        background: transparent !important;
+    }
+
+    .stButton > button:hover:before {
+        opacity: 1;
+    }
+
+    .stButton > button:after {
+        z-index: -1;
+        content: '';
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        background: #00F700;
+        left: 0;
+        top: 0;
+        border-radius: 10px;
+    }
+
+    @keyframes glowing {
+        0% { background-position: 0 0; }
+        50% { background-position: 400% 0; }
+        100% { background-position: 0 0; }
+    }
+
+    .stat-box {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        text-align: center;
+        margin: 0.5rem 0;
+        border: 2px solid #00F700;
+    }
+
+    .confidence-high { 
+        color: #00F700 !important; 
+        font-weight: bold !important;
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+    }
+    .confidence-medium { 
+        color: #ffc107 !important; 
+        font-weight: bold !important;
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+    }
+    .confidence-low { 
+        color: #dc3545 !important; 
+        font-weight: bold !important;
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+    }
+
+    .upload-section {
+        border: 2px dashed #00F700;
+        border-radius: 10px;
+        padding: 1rem;
+        margin: 1rem 0;
+        background: rgba(0, 247, 0, 0.05);
+    }
+
+    .sidebar-title {
+        color: #00F700 !important;
+        font-weight: bold !important;
+        font-size: 1.2rem !important;
+        margin-bottom: 1rem !important;
+    }
+
+    .metric-container {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 0.8rem;
+        border-radius: 8px;
+        margin: 0.3rem 0;
+    }
+
+    .chat-container {
+        border-radius: 10px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+    }
+
+    .user-message {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 15px 15px 5px 15px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+    }
+
+    .assistant-message {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+        border-radius: 15px 15px 15px 5px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+    }
+
+    .processing-indicator {
+        background: linear-gradient(45deg, #00F700, #73ff00);
+        color: white;
+        padding: 1rem;
+        border-radius: 10px;
+        text-align: center;
+        animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.7; }
+        100% { opacity: 1; }
+    }
+    </style>
+    """
+    return css_style
+
 def create_advanced_streamlit_interface():
     """Ilg'or Streamlit interface"""
     
     st.set_page_config(
-        page_title="90% Aniqlikli RAG ChatBot",
+        page_title="90% Aniqlikli ChatBot",
         page_icon="🎯",
         layout="wide",
         initial_sidebar_state="expanded"
     )
     
-    # Custom CSS
-    st.markdown("""
-    <style>
-    .main-header {
-        text-align: center;
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        color: white;
-        margin-bottom: 2rem;
-    }
-    .stat-box {
-        background: #f0f2f6;
-        padding: 1rem;
-        border-radius: 10px;
-        text-align: center;
-        margin: 0.5rem 0;
-    }
-    .confidence-high { color: #28a745; font-weight: bold; }
-    .confidence-medium { color: #ffc107; font-weight: bold; }
-    .confidence-low { color: #dc3545; font-weight: bold; }
-    </style>
-    """, unsafe_allow_html=True)
+    # Apply custom CSS
+    st.markdown(load_css_style(), unsafe_allow_html=True)
     
     # Header
     st.markdown("""
     <div class="main-header">
-        <h1>🎯 90% Aniqlikli RAG ChatBot</h1>
+        <h1>🎯 90% Aniqlikli ChatBot</h1>
         <p>Yuqori aniqlikli AI yordamchisi - API-siz, to'liq offline</p>
     </div>
     """, unsafe_allow_html=True)
@@ -1746,7 +1919,7 @@ def create_advanced_streamlit_interface():
     
     # Sidebar
     with st.sidebar:
-        st.header("⚙️ Boshqaruv Paneli")
+        st.markdown('<h2 class="sidebar-title">⚙️ Boshqaruv Paneli</h2>', unsafe_allow_html=True)
         
         # Model status
         if st.session_state.rag_pipeline.is_ready:
@@ -1755,13 +1928,13 @@ def create_advanced_streamlit_interface():
             
             col1, col2 = st.columns(2)
             with col1:
-                st.metric("📄 Hujjatlar", stats['total_documents'])
-                st.metric("📁 Manbalar", stats['unique_sources'])
+                st.markdown(f'<div class="metric-container">📄 Hujjatlar<br><strong>{stats["total_documents"]}</strong></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="metric-container">📏 O\'rtacha uzunlik<br><strong>{stats["average_length"]:.0f}</strong></div>', unsafe_allow_html=True)
             with col2:
-                st.metric("📏 O'rtacha uzunlik", f"{stats['average_length']:.0f}")
+                st.markdown(f'<div class="metric-container">📁 Manbalar<br><strong>{stats["unique_sources"]}</strong></div>', unsafe_allow_html=True)
                 if 'chunk_types' in stats:
                     semantic_count = stats['chunk_types'].get('semantic', 0)
-                    st.metric("🧠 Semantic chunks", semantic_count)
+                    st.markdown(f'<div class="metric-container">🧠 Semantic chunks<br><strong>{semantic_count}</strong></div>', unsafe_allow_html=True)
         else:
             st.warning("⚠️ Model hali tayyor emas")
         
@@ -1783,13 +1956,25 @@ def create_advanced_streamlit_interface():
         st.markdown("---")
         
         # File upload
+        st.markdown('<div class="upload-section">', unsafe_allow_html=True)
         st.subheader("📤 Hujjat yuklash")
+        
+        # File uploader with improved handling
         uploaded_files = st.file_uploader(
             "Fayllarni tanlang",
             type=['pdf', 'docx', 'txt', 'html', 'md'],
             accept_multiple_files=True,
             help="Qo'llab-quvvatlanuvchi formatlar: PDF, DOCX, TXT, HTML, MD"
         )
+        
+        # Show uploaded files
+        if uploaded_files:
+            st.write("**Yuklangan fayllar:**")
+            for file in uploaded_files:
+                file_size = len(file.getvalue()) / 1024 / 1024  # MB
+                st.write(f"📄 {file.name} ({file_size:.1f} MB)")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
         
         # Processing button
         col1, col2 = st.columns(2)
@@ -1798,35 +1983,67 @@ def create_advanced_streamlit_interface():
         with col2:
             clear_btn = st.button("🗑️ Tozalash", use_container_width=True)
         
-        # Processing
+        # Processing with improved error handling
         if process_btn and uploaded_files:
-            with st.spinner("🔄 Yuqori aniqlikda qayta ishlanmoqda..."):
-                # Save temporary files
-                temp_paths = []
-                for uploaded_file in uploaded_files:
-                    temp_path = f"./temp_{uploaded_file.name}"
-                    with open(temp_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
-                    temp_paths.append(temp_path)
+            # Create temporary directory
+            temp_dir = Path("./temp_uploads")
+            temp_dir.mkdir(exist_ok=True)
+            
+            progress_container = st.container()
+            with progress_container:
+                st.markdown('<div class="processing-indicator">🔄 Yuqori aniqlikda qayta ishlanmoqda...</div>', unsafe_allow_html=True)
+                
+                # Progress tracking
+                progress_bar = st.progress(0)
+                status_text = st.empty()
                 
                 try:
-                    # Process with progress
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
+                    # Save files with better handling
+                    temp_paths = []
+                    total_files = len(uploaded_files)
                     
-                    status_text.text("📄 Hujjatlar yuklanmoqda...")
-                    progress_bar.progress(25)
+                    for i, uploaded_file in enumerate(uploaded_files):
+                        status_text.text(f"📄 Fayl saqlanmoqda: {uploaded_file.name}")
+                        progress_bar.progress((i + 1) / total_files * 0.3)
+                        
+                        # Safe filename
+                        safe_filename = "".join(c for c in uploaded_file.name if c.isalnum() or c in "._-")
+                        temp_path = temp_dir / f"{i}_{safe_filename}"
+                        
+                        # Write file with error handling
+                        try:
+                            with open(temp_path, "wb") as f:
+                                f.write(uploaded_file.getbuffer())
+                            temp_paths.append(str(temp_path))
+                        except Exception as e:
+                            st.error(f"❌ Fayl saqlashda xatolik {uploaded_file.name}: {e}")
+                            continue
                     
+                    if not temp_paths:
+                        st.error("❌ Hech qanday fayl saqlanmadi!")
+                        return
+                    
+                    status_text.text("🧠 Hujjatlar qayta ishlanmoqda...")
+                    progress_bar.progress(0.5)
+                    
+                    # Process documents
                     st.session_state.rag_pipeline.process_documents(temp_paths)
                     
-                    progress_bar.progress(100)
+                    progress_bar.progress(1.0)
                     status_text.text("✅ Muvaffaqiyatli tugadi!")
                     
                     st.success("🎉 Hujjatlar muvaffaqiyatli qayta ishlandi!")
+                    
+                    # Clear progress after success
+                    import time
+                    time.sleep(2)
+                    progress_container.empty()
+                    
                     st.rerun()
                     
                 except Exception as e:
-                    st.error(f"❌ Xatolik: {e}")
+                    st.error(f"❌ Qayta ishlashda xatolik: {e}")
+                    logger.error(f"Processing error: {e}")
                 finally:
                     # Clean up temp files
                     for temp_path in temp_paths:
@@ -1834,24 +2051,33 @@ def create_advanced_streamlit_interface():
                             os.remove(temp_path)
                         except:
                             pass
+                    try:
+                        temp_dir.rmdir()
+                    except:
+                        pass
         
         # Clear data
         if clear_btn:
-            try:
-                # Remove database and embeddings
-                if os.path.exists(st.session_state.rag_pipeline.config.DATABASE_PATH):
-                    os.remove(st.session_state.rag_pipeline.config.DATABASE_PATH)
-                if os.path.exists(st.session_state.rag_pipeline.config.EMBEDDINGS_PATH):
-                    os.remove(st.session_state.rag_pipeline.config.EMBEDDINGS_PATH)
-                
-                # Reset pipeline
-                st.session_state.rag_pipeline = HighAccuracyRAGPipeline()
-                st.session_state.messages = []
-                
-                st.success("✅ Ma'lumotlar tozalandi!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Tozalash xatolik: {e}")
+            if st.session_state.get('clear_confirmed', False):
+                try:
+                    # Remove database and embeddings
+                    if os.path.exists(st.session_state.rag_pipeline.config.DATABASE_PATH):
+                        os.remove(st.session_state.rag_pipeline.config.DATABASE_PATH)
+                    if os.path.exists(st.session_state.rag_pipeline.config.EMBEDDINGS_PATH):
+                        os.remove(st.session_state.rag_pipeline.config.EMBEDDINGS_PATH)
+                    
+                    # Reset pipeline
+                    st.session_state.rag_pipeline = HighAccuracyRAGPipeline()
+                    st.session_state.messages = []
+                    st.session_state.clear_confirmed = False
+                    
+                    st.success("✅ Ma'lumotlar tozalandi!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Tozalash xatolik: {e}")
+            else:
+                st.session_state.clear_confirmed = True
+                st.warning("⚠️ Haqiqatan ham barcha ma'lumotlarni o'chirmoqchimisiz? Qayta bosing.")
     
     # Main chat interface
     st.header("💬 Yuqori Aniqlikli Suhbat")
@@ -1979,15 +2205,5 @@ def create_advanced_streamlit_interface():
                     })
 
 if __name__ == "__main__":
-    # Install required packages prompt
-    st.sidebar.markdown("""
-    ### 📦 Kerakli kutubxonalar:
-    ```bash
-    pip install streamlit numpy pandas scikit-learn
-    pip install nltk PyPDF2 python-docx beautifulsoup4
-    pip install rank-bm25
-    ```
-    """)
-    
     # Run interface
     create_advanced_streamlit_interface()
