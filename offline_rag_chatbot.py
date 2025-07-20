@@ -2138,7 +2138,7 @@ def create_advanced_streamlit_interface():
     
     # Session state initialization
     if 'rag_pipeline' not in st.session_state:
-        st.session_state.rag_pipeline = HighAccuracyRAGPipeline()
+        st.session_state.rag_pipeline = UltraHighAccuracyRAGPipeline()
         # Auto-load existing model
         st.session_state.rag_pipeline.load_existing_model()
     
@@ -2428,7 +2428,7 @@ def create_advanced_streamlit_interface():
                         os.remove(st.session_state.rag_pipeline.config.EMBEDDINGS_PATH)
                     
                     # Reset pipeline
-                    st.session_state.rag_pipeline = HighAccuracyRAGPipeline()
+                    st.session_state.rag_pipeline = UltraHighAccuracyRAGPipeline()
                     st.session_state.messages = []
                     st.session_state.clear_confirmed = False
                     
