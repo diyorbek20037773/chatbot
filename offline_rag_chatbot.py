@@ -1888,7 +1888,7 @@ def create_advanced_streamlit_interface():
     """Ilg'or Streamlit interface"""
     
     st.set_page_config(
-        page_title="90% Aniqlikli ChatBot",
+        page_title="CHATBOT",
         page_icon="🎯",
         layout="wide",
         initial_sidebar_state="expanded"
@@ -1900,7 +1900,7 @@ def create_advanced_streamlit_interface():
     # Header
     st.markdown("""
     <div class="main-header">
-        <h1>🎯 90% Aniqlikli ChatBot</h1>
+        <h1>🎯 CHATBOT</h1>
         <p>Yuqori aniqlikli AI yordamchisi - API-siz, to'liq offline</p>
     </div>
     """, unsafe_allow_html=True)
@@ -1983,7 +1983,7 @@ def create_advanced_streamlit_interface():
         with col2:
             clear_btn = st.button("🗑️ Tozalash", use_container_width=True)
         
-        # Processing with improved error handling
+        # Processing with improved error handling and auto-processing
         if process_btn and uploaded_files:
             # Create temporary directory
             temp_dir = Path("./temp_uploads")
@@ -2002,57 +2002,89 @@ def create_advanced_streamlit_interface():
                     temp_paths = []
                     total_files = len(uploaded_files)
                     
+                    status_text.text("📁 Fayllar saqlanmoqda...")
                     for i, uploaded_file in enumerate(uploaded_files):
-                        status_text.text(f"📄 Fayl saqlanmoqda: {uploaded_file.name}")
-                        progress_bar.progress((i + 1) / total_files * 0.3)
+                        progress_bar.progress((i + 1) / total_files * 0.2)
                         
                         # Safe filename
                         safe_filename = "".join(c for c in uploaded_file.name if c.isalnum() or c in "._-")
+                        if not safe_filename:
+                            safe_filename = f"file_{i}"
                         temp_path = temp_dir / f"{i}_{safe_filename}"
                         
                         # Write file with error handling
                         try:
+                            file_content = uploaded_file.getbuffer()
                             with open(temp_path, "wb") as f:
-                                f.write(uploaded_file.getbuffer())
+                                f.write(file_content)
                             temp_paths.append(str(temp_path))
+                            logger.info(f"Fayl saqlandi: {temp_path}")
                         except Exception as e:
                             st.error(f"❌ Fayl saqlashda xatolik {uploaded_file.name}: {e}")
+                            logger.error(f"File save error for {uploaded_file.name}: {e}")
                             continue
                     
                     if not temp_paths:
                         st.error("❌ Hech qanday fayl saqlanmadi!")
                         return
                     
-                    status_text.text("🧠 Hujjatlar qayta ishlanmoqda...")
-                    progress_bar.progress(0.5)
+                    status_text.text(f"✅ {len(temp_paths)} ta fayl saqlandi")
+                    progress_bar.progress(0.3)
                     
                     # Process documents
-                    st.session_state.rag_pipeline.process_documents(temp_paths)
+                    status_text.text("🧠 Hujjatlar qayta ishlanmoqda...")
+                    progress_bar.progress(0.4)
                     
-                    progress_bar.progress(1.0)
-                    status_text.text("✅ Muvaffaqiyatli tugadi!")
+                    # Create new pipeline instance to avoid conflicts
+                    temp_pipeline = HighAccuracyRAGPipeline()
+                    temp_pipeline.process_documents(temp_paths)
                     
-                    st.success("🎉 Hujjatlar muvaffaqiyatli qayta ishlandi!")
+                    # Replace current pipeline
+                    st.session_state.rag_pipeline = temp_pipeline
                     
-                    # Clear progress after success
-                    import time
-                    time.sleep(2)
-                    progress_container.empty()
+                    progress_bar.progress(0.9)
+                    status_text.text("💾 Model saqlanmoqda...")
                     
-                    st.rerun()
+                    # Verify the model is ready
+                    if st.session_state.rag_pipeline.is_ready:
+                        progress_bar.progress(1.0)
+                        status_text.text("✅ Muvaffaqiyatli tugadi!")
+                        
+                        # Show success message
+                        final_stats = st.session_state.rag_pipeline.database.get_stats()
+                        success_msg = f"""
+                        🎉 **Qayta ishlash muvaffaqiyatli tugadi!**
+                        - 📄 Jami chunklar: {final_stats['total_documents']}
+                        - 📁 Manbalar: {final_stats['unique_sources']}
+                        - 📏 O'rtacha uzunlik: {final_stats['average_length']:.0f} belgi
+                        """
+                        st.success(success_msg)
+                        
+                        # Clear progress after success
+                        import time
+                        time.sleep(3)
+                        progress_container.empty()
+                        st.rerun()
+                    else:
+                        st.error("❌ Model tayyor emas. Qayta urinib ko'ring.")
                     
                 except Exception as e:
                     st.error(f"❌ Qayta ishlashda xatolik: {e}")
                     logger.error(f"Processing error: {e}")
+                    import traceback
+                    logger.error(f"Full traceback: {traceback.format_exc()}")
                 finally:
                     # Clean up temp files
                     for temp_path in temp_paths:
                         try:
-                            os.remove(temp_path)
-                        except:
-                            pass
+                            if os.path.exists(temp_path):
+                                os.remove(temp_path)
+                                logger.info(f"Temp file cleaned: {temp_path}")
+                        except Exception as e:
+                            logger.warning(f"Could not remove temp file {temp_path}: {e}")
                     try:
-                        temp_dir.rmdir()
+                        if temp_dir.exists() and not list(temp_dir.iterdir()):
+                            temp_dir.rmdir()
                     except:
                         pass
         
