@@ -1,0 +1,25 @@
+# Core ML and NLP libraries
+numpy>=1.21.0
+pandas>=1.3.0
+scikit-learn>=1.0.0
+nltk>=3.6.0
+
+# Document processing
+PyPDF2>=3.0.0
+python-docx>=0.8.11
+beautifulsoup4>=4.10.0
+
+# Search and ranking
+rank-bm25>=0.2.2
+
+# Web interface
+streamlit>=1.28.0
+
+# Additional utilities
+pathlib2>=2.3.7
+python-dateutil>=2.8.2
+tqdm>=4.64.0
+
+# Optional: For better performance
+numba>=0.56.0
+scipy>=1.7.0
